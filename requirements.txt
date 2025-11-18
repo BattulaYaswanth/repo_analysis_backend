@@ -1,0 +1,12 @@
+fastapi[standard]
+uvicorn
+pydantic[email]
+python-dotenv
+pymongo
+passlib[bcrypt]
+pyjwt
+PyGithub
+httpx
+gitpython
+langchain-groq
+langchain
