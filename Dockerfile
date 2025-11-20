@@ -18,7 +18,7 @@ COPY . .
 
 # 4. Expose the port (Render uses 10000, HF uses 7860)
 # We will use an environment variable for flexibility
-ENV PORT=1000
+ENV PORT=10000
 
 # 5. Run the application
 # We use --host 0.0.0.0 so external traffic can reach it
