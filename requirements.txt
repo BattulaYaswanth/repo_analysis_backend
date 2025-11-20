@@ -10,3 +10,6 @@ httpx
 gitpython
 langchain-groq
 langchain
+cachetools
+tiktoken
+google-generativeai

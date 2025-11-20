@@ -37,6 +37,7 @@ class RepoDetails(BaseModel):
     email:str
     repo_name: str
     repo_url:str
+    used_model:str
     languages: dict[str, float]
     total_files: int
     has_readme: bool
@@ -44,3 +45,7 @@ class RepoDetails(BaseModel):
     review:str
     docs:str
     tests:str
+
+class CodeInput(BaseModel):
+    code:str
+    language:str

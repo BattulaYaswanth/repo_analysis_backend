@@ -16,6 +16,3 @@ services:
 
 volumes:
   mongo_data:
-
-  # The MongoDB URI for this database is:
-  # mongodb://root:password@localhost:27017/ai-developer-productivity

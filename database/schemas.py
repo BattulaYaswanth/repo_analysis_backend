@@ -16,6 +16,7 @@ def individual_review(review) -> dict:
         "owner": str(review.get("owner", "")),
         "repo_name": str(review.get("repo_name", "")),
         "repo_url": str(review.get("repo_url", "")),
+        "used_model":str(review.get("used_model","")),
         "languages": dict(review.get("languages", {})),
         "total_files": int(review.get("total_files", 0)),
         "has_readme": bool(review.get("has_readme", False)),
