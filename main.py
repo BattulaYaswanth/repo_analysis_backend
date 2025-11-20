@@ -27,12 +27,19 @@ from tokens.check_tokens import get_remaining_tokens
 load_dotenv()
 app = FastAPI(title="AI Developer Productivity API")
 router = APIRouter()
+# 1. Get the string from env
+raw_origins = os.getenv("ALLOWED_ORIGINS", "")
+
+# 2. Parse it into a list
+
 
 # ─── CORS Setup ──────────────────────────────────────────────
-origins = [
-    "http://localhost:3000",
-    "https://yourfrontenddomain.com",
-]
+if raw_origins:
+    origins = [origin.strip() for origin in raw_origins.split(",")]
+else:
+    # Fallback if env var is missing (optional)
+    origins = ["http://localhost:3000"]
+print(f"🌍 Allowed CORS Origins: {origins}")
 
 app.add_middleware(
     CORSMiddleware,
