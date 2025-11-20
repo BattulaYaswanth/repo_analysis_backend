@@ -14,3 +14,4 @@ langchain
 cachetools
 tiktoken
 google-generativeai
+certifi
