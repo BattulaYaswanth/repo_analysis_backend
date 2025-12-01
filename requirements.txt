@@ -16,3 +16,5 @@ tiktoken
 google-generativeai
 certifi
 fastapi-limiter
+slowapi
+redis

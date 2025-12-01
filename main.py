@@ -10,7 +10,10 @@ from collections import defaultdict
 from cachetools import TTLCache
 from typing import AsyncGenerator
 from datetime import timedelta, timezone
+from fastapi_limiter import FastAPILimiter
 from fastapi_limiter.depends import RateLimiter
+import redis.asyncio as redis
+from fastapi_limiter import FastAPILimiter
 
 import os, re, git, tempfile,datetime,random
 import google.generativeai as genai
@@ -28,14 +31,13 @@ from tokens.check_tokens import get_remaining_tokens
 
 # ─── FastAPI Setup ───────────────────────────────────────────
 load_dotenv()
-app = FastAPI(title="AI Developer Productivity API",
-              dependencies=[Depends(RateLimiter(times=10, seconds=60))])
+# REMOVE: dependencies=[Depends(RateLimiter(times=10, seconds=60))] from app declaration
+# This dependency should only be on specific routes or the APIRouter.
+app = FastAPI(title="AI Developer Productivity API")
 router = APIRouter()
 # 1. Get the string from env
 raw_origins = os.getenv("ALLOWED_ORIGINS", "")
-
 # 2. Parse it into a list
-
 
 # ─── CORS Setup ──────────────────────────────────────────────
 if raw_origins:
@@ -52,6 +54,48 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ─── RATE LIMITER INITIALIZATION (REQUIRES REDIS) ─────────────
+
+@app.on_event("startup")
+async def startup():
+    """Initialize Redis (Redis Labs) and FastAPILimiter on startup."""
+    
+    # --- 1. Configuration for Redis Labs ---
+    # Your Redis Labs hostname and port
+    REDIS_HOST = os.getenv("REDIS_URL")
+    REDIS_PORT = os.getenv("REDIS_PORT")
+    
+    # Retrieve the password from the environment variables (CRITICAL)
+    # Ensure REDIS_PASSWORD is set in your .env or environment
+    REDIS_PASSWORD = os.getenv("REDIS_PASSWORD") 
+    
+    if not REDIS_PASSWORD:
+        print("❌ CRITICAL: REDIS_PASSWORD environment variable is not set. Rate limiting will not be initialized.")
+        return 
+        
+    print(f"🔗 Attempting secure connection to Redis Labs at: {REDIS_HOST}:{REDIS_PORT}")
+
+    try:
+        # --- 2. Create the Secure Connection Client ---
+        redis_client = redis.Redis(
+            host=REDIS_HOST,
+            port=REDIS_PORT,
+            password=REDIS_PASSWORD,
+            username="default",
+            decode_responses=True
+        )
+        
+        # --- 3. Test Connection and Initialize Limiter ---
+        await redis_client.ping() 
+        print("✅ Secure Redis connection successful.")
+        await FastAPILimiter.init(redis_client)
+        print("✅ FastAPILimiter initialized.")
+        
+    except Exception as e:
+        print(f"❌ Failed to connect to Redis Labs/initialize FastAPILimiter: {e}")
+        # Optionally, raise the exception here if Redis is a hard dependency
+        # raise Exception("Failed to connect to Redis for rate limiting.") from e
 
 # ─── GitHub Setup ────────────────────────────────────────────
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
@@ -442,7 +486,8 @@ async def resend_otp(data: dict):
 
 
 
-@router.post("/api/auth/register")
+@router.post("/api/auth/register",
+             dependencies=[Depends(RateLimiter(times=20, seconds=60))])
 async def register_user(user: UserRegister):
     try:
         if not is_valid_email(user.email):
@@ -505,7 +550,7 @@ async def register_user(user: UserRegister):
         raise HTTPException(status_code=500, detail=f"Server Error: {e}")
 
 
-@router.post("/api/auth/login")
+@router.post("/api/auth/login",dependencies=[Depends(RateLimiter(times=15, seconds=60))])
 async def login_user(user: UserLogin):
     try:
         db_user = collection.find_one({"email": user.email})
@@ -589,7 +634,8 @@ async def delete_user(user_id: str):
 
 # ─── Routes: Repo Analysis ──────────────────────────────────
 # (No changes needed in analysis routes)
-@router.post("/api/analyze_repo", status_code=202)
+@router.post("/api/analyze_repo", status_code=202,
+            dependencies=[Depends(RateLimiter(times=5, seconds=60))])
 async def analyze_repo(data: RepoInput, background_tasks: BackgroundTasks, authorization: str = Header(None)):
 
     token = extract_bearer_token(authorization)
