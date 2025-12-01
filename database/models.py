@@ -19,6 +19,14 @@ class UserRegister(UserBase):
 class UserLogin(UserBase):
     password: str = Field(..., min_length=6)
 
+# NEW Models for OTP
+class OTPRequest(BaseModel):
+    email: EmailStr
+
+class OTPVerify(BaseModel):
+    email: EmailStr
+    otp: str
+
 ### GITHUB Urls Models ###
 
 class RepoInput(BaseModel):

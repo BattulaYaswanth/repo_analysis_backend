@@ -1,8 +1,7 @@
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 from dotenv import load_dotenv
-import os
-import certifi  # <--- 1. Import this library
+import os,certifi
 
 load_dotenv()
 

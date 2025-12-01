@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Header , BackgroundTasks
+from fastapi import FastAPI, APIRouter, HTTPException, Header , BackgroundTasks,Depends
 from fastapi.responses import StreamingResponse,PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -9,23 +9,27 @@ from langchain_core.messages import HumanMessage
 from collections import defaultdict
 from cachetools import TTLCache
 from typing import AsyncGenerator
+from datetime import timedelta, timezone
+from fastapi_limiter.depends import RateLimiter
 
 import os, re, git, tempfile,datetime,random
 import google.generativeai as genai
 # ─── Internal Imports ────────────────────────────────────────
-from configurarions import collection, review_collection
+from configurations import collection, review_collection
 from database.models import UserRegister, UserLogin, RepoInput,TokenRefresh,CodeInput
 from database.schemas import all_users
 from auth.auth_libs import (
     hash_password, verify_password,
     create_jwt_token, is_jwt_token_valid,
-    decode_jwt_token,create_refresh_token,is_refresh_token_valid
+    decode_jwt_token,create_refresh_token,is_refresh_token_valid,
+    generate_otp,send_otp_email,hash_otp,verify_otp as verify_otp_hash
 )
 from tokens.check_tokens import get_remaining_tokens
 
 # ─── FastAPI Setup ───────────────────────────────────────────
 load_dotenv()
-app = FastAPI(title="AI Developer Productivity API")
+app = FastAPI(title="AI Developer Productivity API",
+              dependencies=[Depends(RateLimiter(times=10, seconds=60))])
 router = APIRouter()
 # 1. Get the string from env
 raw_origins = os.getenv("ALLOWED_ORIGINS", "")
@@ -77,6 +81,9 @@ def validate_refresh_token_or_401(token: str):
         raise HTTPException(status_code=401, detail=token_data["error"])
     return token_data
 
+def is_valid_email(email: str) -> bool:
+    regex = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+    return re.match(regex, email) is not None
 
 # --------------------------------------
 # Clone Repository
@@ -323,33 +330,189 @@ async def get_reviews(email:str,authorization: str = Header(None)):
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Server Error: {e}")
+    
+@router.post("/api/user/verify-otp")
+async def verify_otp_endpoint(data: dict):
+    try:
+        # Lookup user
+        user = collection.find_one({"email": data.get("email")})
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Already verified
+        if user.get("verified"):
+            return {"status": "success", "message": "User already verified"}
+
+        # Validate provided OTP
+        provided_otp_raw = data.get("otp")
+        if provided_otp_raw is None:
+            raise HTTPException(status_code=400, detail="OTP is required")
+        provided_otp = str(provided_otp_raw).strip()
+        if not provided_otp.isdigit():
+            raise HTTPException(status_code=400, detail="Invalid OTP format")
+
+        # Verify hashed OTP
+        hashed_otp = user.get("otp")
+        if not hashed_otp:
+            raise HTTPException(status_code=400, detail="Invalid OTP")
+        
+        if not verify_otp_hash(provided_otp, hashed_otp):
+            raise HTTPException(status_code=400, detail="Invalid OTP")
+
+        # Expiry check (coerce DB value to timezone-aware UTC if needed)
+        expiry = user.get("otp_expiry")
+        if not expiry:
+            raise HTTPException(status_code=400, detail="OTP expired")
+
+        # PyMongo often returns naive datetimes (UTC without tzinfo). Coerce to
+        # timezone-aware UTC so comparisons with `datetime.now(timezone.utc)` work.
+        try:
+            if isinstance(expiry, datetime.datetime) and expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+        except Exception:
+            # If expiry isn't a datetime for some reason, fail as expired
+            raise HTTPException(status_code=400, detail="OTP expired")
+
+        if datetime.datetime.now(timezone.utc) > expiry:
+            raise HTTPException(status_code=400, detail="OTP expired")
+
+        # Mark user as verified and clear OTP fields
+        collection.update_one(
+            {"email": user["email"]},
+            {"$set": {"verified": True}, "$unset": {"otp": "", "otp_expiry": "","last_otp_sent":""}}
+        )
+
+        return {"status": "success", "message": "Account verified successfully"}
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Server Error: {e}")
+    
+@router.post("/api/user/resend-otp")
+async def resend_otp(data: dict):
+    try:
+        user = collection.find_one({"email": data.get("email")})
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if user.get("verified"):
+            return {"status": "success", "message": "User already verified"}
+
+        # Rate limiting: 60-second cooldown between resend attempts
+        last_otp_sent = user.get("last_otp_sent")
+        if last_otp_sent:
+            if isinstance(last_otp_sent, datetime.datetime) and last_otp_sent.tzinfo is None:
+                last_otp_sent = last_otp_sent.replace(tzinfo=timezone.utc)
+            
+            time_elapsed = (datetime.datetime.now(timezone.utc) - last_otp_sent).total_seconds()
+            if time_elapsed < 60:
+                seconds_remaining = int(60 - time_elapsed)
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Please wait {seconds_remaining} seconds before requesting a new OTP"
+                )
+
+        otp = generate_otp()
+        hashed_otp = hash_otp(otp)
+        otp_expiry = datetime.datetime.now(timezone.utc) + timedelta(minutes=10)
+        otp_ttl_seconds = 600  # 10 minutes
+        
+        collection.update_one(
+            {"email": user["email"]},
+            {"$set": {
+                "otp": hashed_otp,
+                "otp_expiry": otp_expiry,
+                "last_otp_sent": datetime.datetime.now(timezone.utc)
+            }}
+        )
+
+        # Send OTP email
+        await send_otp_email(user["email"], f"Your new OTP is: {otp}")
+        
+        return {
+            "status": "success",
+            "message": "OTP resent successfully",
+            "otp_ttl_seconds": otp_ttl_seconds
+        }
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Server Error: {e}")
+
+
 
 @router.post("/api/auth/register")
 async def register_user(user: UserRegister):
     try:
-        if collection.find_one({"email": user.email}):
+        if not is_valid_email(user.email):
+            raise HTTPException(status_code=400, detail="Invalid email format")
+        existing_user = collection.find_one({"email": user.email})
+
+        # If user already exists and is verified, reject registration
+        if existing_user and existing_user.get("verified"):
             raise HTTPException(status_code=400, detail="User already exists")
+
+        # If user exists but is not verified, re-issue OTP and update password/hash if provided
+        otp = generate_otp()
+        hashed_otp = hash_otp(otp)
+        otp_expiry = datetime.datetime.now(timezone.utc) + timedelta(minutes=10)
+        otp_ttl_seconds = 600  # 10 minutes
+
+        if existing_user and not existing_user.get("verified"):
+            # Optionally update password if a new one provided
+            updated_fields = {}
+            if user.password:
+                updated_fields["password"] = hash_password(user.password)
+            updated_fields.update({
+                "otp": hashed_otp,
+                "otp_expiry": otp_expiry,
+                "last_otp_sent": datetime.datetime.now(timezone.utc)
+            })
+            collection.update_one({"email": user.email}, {"$set": updated_fields})
+            await send_otp_email(user.email, f"Your OTP verification code is: {otp}")
+            return {
+                "status": "pending_verification",
+                "id": str(existing_user.get("_id")),
+                "message": "OTP re-sent to email. Verify to activate your account.",
+                "otp_ttl_seconds": otp_ttl_seconds
+            }
+
         if len(user.password) < 6:
             raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
 
-        user.password = hash_password(user.password)
-        inserted = collection.insert_one(dict(user))
-        token = create_jwt_token(str(inserted.inserted_id), user.email)
+        # Create new user (unverified) and send OTP
+        user_doc = dict(user)
+        user_doc["password"] = hash_password(user.password)
+        user_doc["verified"] = False
+        user_doc["otp"] = hashed_otp
+        user_doc["otp_expiry"] = otp_expiry
+        user_doc["last_otp_sent"] = datetime.datetime.now(timezone.utc)
 
-        # NOTE: This endpoint doesn't need to return the refresh token, only login does.
-        return {"status": "success", "id": str(inserted.inserted_id), "access_token": token}
+        inserted = collection.insert_one(user_doc)
+        await send_otp_email(user.email, f"Your OTP verification code is: {otp}")
+
+        return {
+            "status": "pending_verification",
+            "id": str(inserted.inserted_id),
+            "message": "OTP sent to email. Verify to activate your account.",
+            "otp_ttl_seconds": otp_ttl_seconds
+        }
 
     except HTTPException as e:
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Server Error: {e}")
 
+
 @router.post("/api/auth/login")
-async def login_user(user: UserLogin): # Response removed as cookie is no longer set
+async def login_user(user: UserLogin):
     try:
         db_user = collection.find_one({"email": user.email})
         if not db_user:
             raise HTTPException(status_code=404, detail="User not found")
+        if not db_user["verified"]:
+            raise HTTPException(status_code=403, detail="User not verified")
         if not verify_password(user.password, db_user["password"]):
             raise HTTPException(status_code=400, detail="Invalid credentials")
 
@@ -447,7 +610,7 @@ async def analyze_repo(data: RepoInput, background_tasks: BackgroundTasks, autho
         "repo_url": repo_url,
         "email": get_email(token),
         "status": "pending",
-        "created_at": datetime.datetime.utcnow(),
+        "created_at": datetime.datetime.now(timezone.utc),
     }
 
     inserted = review_collection.insert_one(new_doc)
