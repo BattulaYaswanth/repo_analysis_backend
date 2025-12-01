@@ -13,8 +13,8 @@ class UserBase(BaseModel):
 class UserRegister(UserBase):
     username: str = Field(..., min_length=2, max_length=50)
     password: str = Field(..., min_length=6, example="strongpassword123")
-    created_at:datetime = aware_utcnow()
-    updated_at:datetime = aware_utcnow()
+    created_at: datetime = Field(default_factory=aware_utcnow)
+    updated_at: datetime = Field(default_factory=aware_utcnow)
 
 class UserLogin(UserBase):
     password: str = Field(..., min_length=6)
