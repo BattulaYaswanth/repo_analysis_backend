@@ -1,8 +1,7 @@
 from datetime import datetime,timedelta
 import bcrypt,random,jwt,os
-import smtplib
-from email.mime.text import MIMEText
-import asyncio
+import resend
+from resend import Emails
 
 def hash_password(password:str):
     salt = bcrypt.gensalt()
@@ -105,50 +104,14 @@ def verify_otp(provided_otp: str, hashed_otp: str) -> bool:
 
 OTP_MESSAGE_TEMPLATE = os.getenv("OTP_MESSAGE_TEMPLATE")
 # Email configuration
-SMTP_SERVER = os.getenv("SMTP_SERVER")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
-SMTP_EMAIL = os.getenv("SMTP_EMAIL")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 async def send_otp_email(email: str, otp: str):
-    """Send OTP email using configured SMTP server.
-
-    - Uses SMTPS (`SMTP_SSL`) when `SMTP_PORT` is 465.
-    - Uses STARTTLS (`SMTP(...); starttls()`) for other common ports (e.g., 587).
-    - Runs the blocking SMTP calls in a thread via `asyncio.to_thread` so the event loop
-      isn't blocked.
-    """
-    sender = SMTP_EMAIL
-    password = SMTP_PASSWORD
-    # Fallback message if template missing
+    resend.api_key = os.getenv("RESEND_API")
     template = OTP_MESSAGE_TEMPLATE or "Your verification code is: {otp}"
     message = template.format(otp=otp)
-    msg = MIMEText(message)
-    msg["Subject"] = "Verify your account"
-    msg["From"] = sender
-    msg["To"] = email
-
-    def _send():
-        # Choose SSL vs STARTTLS based on port
-        try:
-            if SMTP_PORT == 465:
-                with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
-                    server.login(sender, password)
-                    server.sendmail(sender, [email], msg.as_string())
-            else:
-                with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10) as server:
-                    server.ehlo()
-                    # Start TLS for non-SSL port (common: 587)
-                    try:
-                        server.starttls()
-                        server.ehlo()
-                    except Exception:
-                        # If starttls fails, continue and let login raise a meaningful error
-                        pass
-                    server.login(sender, password)
-                    server.sendmail(sender, [email], msg.as_string())
-        except Exception:
-            # Re-raise to be handled by caller
-            raise
-
-    # Run the blocking send in a thread
-    await asyncio.to_thread(_send)
+    payload = {
+        "from": "onboarding@resend.dev",
+        "to": email,
+        "subject": "Verification Code",
+        "html": f"<p><b>{message}</b></p>",
+    }
+    return Emails.send(payload)
