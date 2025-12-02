@@ -18,3 +18,4 @@ certifi
 fastapi-limiter
 slowapi
 redis
+resend
