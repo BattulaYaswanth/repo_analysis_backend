@@ -8,14 +8,6 @@ load_dotenv()
 uri = os.getenv("MONGO_URI")
 DB_NAME = os.getenv("DB_NAME")  # (Renamed variable slightly for clarity)
 
-# Determine whether to enable TLS options.
-# In production (e.g. MongoDB Atlas) TLS is required and the CA bundle
-# from `certifi` should be supplied. In local development a plain
-# non-TLS Mongo instance is commonly used — forcing `tlsCAFile` there
-# causes an SSL handshake failure (EOF). We support three heuristics:
-#  - explicit `MONGO_TLS` env var (true/1/yes)
-#  - `mongodb+srv://` URIs (SRV implies TLS)
-#  - `tls=true` or `ssl=true` in the URI query
 
 def _is_tls_required(uri: str | None) -> bool:
     if not uri:

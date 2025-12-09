@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Header , BackgroundTasks,Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Header , BackgroundTasks,Depends,Request,status
 from fastapi.responses import StreamingResponse,PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -10,6 +10,7 @@ from collections import defaultdict
 from cachetools import TTLCache
 from typing import AsyncGenerator
 from datetime import timedelta, timezone
+from threading import Lock
 
 import os, re, git, tempfile,datetime,random
 import google.generativeai as genai
@@ -19,7 +20,7 @@ from database.models import UserRegister, UserLogin, RepoInput,TokenRefresh,Code
 from database.schemas import all_users
 from auth.auth_libs import (
     hash_password, verify_password,
-    create_jwt_token, is_jwt_token_valid,
+    create_jwt_token, is_jwt_token_valid_and_active,
     decode_jwt_token,create_refresh_token,is_refresh_token_valid,
     generate_otp,send_otp_email,hash_otp,verify_otp as verify_otp_hash
 )
@@ -70,7 +71,7 @@ def extract_bearer_token(authorization: str | None) -> str:
     return parts[1]
 
 def validate_token_or_401(token: str):
-    if not is_jwt_token_valid(token):
+    if not is_jwt_token_valid_and_active(token):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     
 def validate_refresh_token_or_401(token: str):
@@ -296,6 +297,59 @@ def set_progress(job_id: str, value: int):
 # Global Progress Store (non-blocking, works per-job)
 JOB_PROGRESS = defaultdict(lambda: 0)
 
+# Dictionary to store request counts: {ip_address: {"count": int, "reset_time": datetime}}
+REQUEST_COUNTS = {}
+# Lock for thread safety when modifying the shared dictionary
+IP_LOCK = Lock()
+
+# --- Configuration ---
+RATE_LIMIT_TIMES = 5  # Max requests
+RATE_LIMIT_SECONDS = 60 # Time window (60 seconds = 1 minute)
+
+def InMemoryRateLimiter(request: Request):
+    """
+    Implements a simple in-memory, single-process rate limiter.
+    Raises HTTPException 429 if the limit is exceeded.
+    """
+    client_ip = request.client.host
+    current_time =  datetime.datetime.now()
+    
+    # Acquire lock before modifying shared state
+    with IP_LOCK:
+        if client_ip not in REQUEST_COUNTS:
+            # First request from this IP
+            REQUEST_COUNTS[client_ip] = {
+                "count": 1,
+                "reset_time": current_time + timedelta(seconds=RATE_LIMIT_SECONDS)
+            }
+        else:
+            data = REQUEST_COUNTS[client_ip]
+            reset_time = data["reset_time"]
+
+            if current_time > reset_time:
+                # Limit window expired, reset count and set new reset time
+                data["count"] = 1
+                data["reset_time"] = current_time + timedelta(seconds=RATE_LIMIT_SECONDS)
+            else:
+                # Still within the window, check the count
+                if data["count"] >= RATE_LIMIT_TIMES:
+                    # Limit exceeded
+                    
+                    # Calculate seconds until reset for the 'Retry-After' header
+                    time_until_reset = int((reset_time - current_time).total_seconds())
+
+                    raise HTTPException(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        detail=f"Rate limit exceeded. Try again in {time_until_reset} seconds."
+                        # You can manually add headers if needed, e.g., headers={"Retry-After": str(time_until_reset)}
+                    )
+                else:
+                    # Increment the count
+                    data["count"] += 1
+    
+    # Note: We don't return anything as it's a dependency for side effects (checking/incrementing)
+    return
+
 # ─── Routes: Auth ────────────────────────────────────────────
 @router.get("/api/auth/validate-token")
 async def validate_token(authorization: str = Header(None)):
@@ -415,7 +469,7 @@ async def resend_otp(data: dict):
 
         otp = generate_otp()
         hashed_otp = hash_otp(otp)
-        otp_expiry = datetime.datetime.now(timezone.utc) + timedelta(minutes=10)
+        otp_expiry = datetime.datetime.now(timezone.utc) + timedelta(minutes=5)
         otp_ttl_seconds = 600  # 10 minutes
         
         collection.update_one(
@@ -456,7 +510,7 @@ async def register_user(user: UserRegister):
         # If user exists but is not verified, re-issue OTP and update password/hash if provided
         otp = generate_otp()
         hashed_otp = hash_otp(otp)
-        otp_expiry = datetime.datetime.now(timezone.utc) + timedelta(minutes=10)
+        otp_expiry = datetime.datetime.now(timezone.utc) + timedelta(minutes=5)
         otp_ttl_seconds = 600  # 10 minutes
 
         if existing_user and not existing_user.get("verified"):
@@ -511,8 +565,49 @@ async def login_user(user: UserLogin):
         db_user = collection.find_one({"email": user.email})
         if not db_user:
             raise HTTPException(status_code=404, detail="User not found")
+        
         if not db_user["verified"]:
+            
+            # --- MODIFIED LOGIC START ---
+            
+            # Default to 0 seconds elapsed if OTP has never been sent
+            time_elapsed = 301 # Start with a value > 300 to pass the check initially
+            last_otp_sent = db_user.get("last_otp_sent")
+            
+            if last_otp_sent:
+                # Ensure the datetime object is timezone-aware (UTC) for accurate comparison
+                if isinstance(last_otp_sent, datetime.datetime) and last_otp_sent.tzinfo is None:
+                    last_otp_sent = last_otp_sent.replace(tzinfo=timezone.utc)
+                
+                # Calculate the actual time elapsed
+                time_elapsed = (datetime.datetime.now(timezone.utc) - last_otp_sent).total_seconds()
+            
+            # Check if 5 minutes (300 seconds) have NOT passed
+            if time_elapsed < 300:
+                seconds_remaining = int(300 - time_elapsed)
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Already Email Sent Please Verify Your Account"
+                )
+            
+            # If 5 minutes HAVE passed (time_elapsed >= 300), proceed to send a new OTP
+            
+            # --- MODIFIED LOGIC END ---
+            
+            otp = generate_otp()
+            hashed_otp = hash_otp(otp)
+            otp_expiry = datetime.datetime.now(timezone.utc) + timedelta(minutes=5)
+            collection.update_one(
+                {"email": db_user["email"]},
+                {"$set": {
+                    "otp": hashed_otp,
+                    "otp_expiry": otp_expiry,
+                    "last_otp_sent": datetime.datetime.now(timezone.utc) # Update the timestamp
+                }}
+            )
+            await send_otp_email(db_user["email"], f"Your OTP verification code is: {otp}")
             raise HTTPException(status_code=403, detail="User not verified")
+        
         if not verify_password(user.password, db_user["password"]):
             raise HTTPException(status_code=400, detail="Invalid credentials")
 
@@ -574,22 +669,63 @@ async def refresh_access_token(data: TokenRefresh):
         print("🔥 Server Error:", e)
         raise HTTPException(status_code=500, detail=f"Server Error: {str(e)}")
 
-@router.delete("/api/auth/delete/{user_id}")
-async def delete_user(user_id: str):
+@router.delete("/api/review/delete/{review_id}")
+async def delete_review(review_id: str, authorization: str = Header(None)):
     try:
-        user_obj_id = ObjectId(user_id)
-        if not collection.find_one({"_id": user_obj_id}):
-            raise HTTPException(status_code=404, detail="User not found")
+        token = extract_bearer_token(authorization)
+        validate_token_or_401(token)
 
-        collection.delete_one({"_id": user_obj_id})
-        return {"message": "User deleted successfully"}
+        review_id = ObjectId(review_id)
 
+        result = review_collection.delete_one({"_id":review_id})
+
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Review not found")
+
+        return {
+            "status": "success",
+            "message": "Review deleted successfully",
+            "deleted_count": result.deleted_count
+        }
+
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Server Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Server Error during deletion: {e}")
+
+@router.delete("/api/users/{user_id}")
+async def delete_user_and_reviews(user_id: str,authorization: str = Header(None)):
+    try:
+        token = extract_bearer_token(authorization)
+        validate_token_or_401(token)
+        # 1. DELETE USER RECORD
+        # Find and delete the user
+        user_result = collection.delete_one({"email": user_id})
+        
+        if user_result.deleted_count == 0:
+            # If no user was deleted, raise a 404
+            raise HTTPException(status_code=404, detail=f"User with ID {user_id} not found")
+
+        # 2. DELETE ASSOCIATED REVIEW RECORDS
+        # Delete all documents in the review collection where the 'user_id' matches the deleted user's ID.
+        # Ensure the field name in the review collection is correct (e.g., 'user_id' or 'author_id')
+        review_result = review_collection.delete_many({"email": user_id})
+
+        return {
+            "message": "User and all associated reviews deleted successfully",
+            "reviews_deleted": review_result.deleted_count
+        }
+
+    except HTTPException as e:
+        # Re-raise explicit HTTP exceptions
+        raise e
+    except Exception as e:
+        # Handle invalid ObjectId format or other server errors
+        raise HTTPException(status_code=500, detail=f"Server Error during deletion: {e}")
 
 # ─── Routes: Repo Analysis ──────────────────────────────────
 # (No changes needed in analysis routes)
-@router.post("/api/analyze_repo", status_code=202)
+@router.post("/api/analyze_repo", status_code=202,dependencies=[Depends(InMemoryRateLimiter)])
 async def analyze_repo(data: RepoInput, background_tasks: BackgroundTasks, authorization: str = Header(None)):
 
     token = extract_bearer_token(authorization)
@@ -620,7 +756,7 @@ async def analyze_repo(data: RepoInput, background_tasks: BackgroundTasks, autho
 
     return {"status": "job_submitted", "id": job_id}
 
-@router.get("/api/analyze_repo/{id}")
+@router.get("/api/analyze_repo/{id}",dependencies=[Depends(InMemoryRateLimiter)])
 def get_review_by_id(id: str, authorization: str = Header(None)):
     try:
         token = extract_bearer_token(authorization)
@@ -770,7 +906,7 @@ PROMPT_TEMPLATE = """
 # Cache: key = code text, value = full generated review text
 CODEREVIEW_CACHE = TTLCache(maxsize=1000, ttl=1800)  # TTL = 30 Minutes
 
-@router.post("/api/code_review")
+@router.post("/api/code_review",dependencies=[Depends(InMemoryRateLimiter)])
 async def code_review(request: CodeInput, authorization: str = Header(None)):
 
     try:
@@ -844,6 +980,15 @@ async def code_review(request: CodeInput, authorization: str = Header(None)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+    
+@router.get("/limited", dependencies=[Depends(InMemoryRateLimiter)])
+async def limited_route():
+    # This route is limited to 5 requests per minute per IP
+    return {"message": "You accessed the limited route successfully!"}
+    
+@router.get("/unlimited")
+async def unlimited_route():
+    return {"message": "This route has no limits."}
 
 
 # ─── Include Router ─────────────────────────────────────────

@@ -2,6 +2,8 @@ from datetime import datetime,timedelta
 import bcrypt,random,jwt,os
 import resend
 from resend import Emails
+from configurations import collection
+from bson.objectid import ObjectId
 
 def hash_password(password:str):
     salt = bcrypt.gensalt()
@@ -39,14 +41,34 @@ def create_refresh_token(user_id:str,email:str) -> str:
     encoded_refresh_token = jwt.encode(payload, REFRESH_SECRET_KEY, algorithm="HS256")
     return encoded_refresh_token
 
-def is_jwt_token_valid(token:str) -> bool:
+def is_jwt_token_valid_and_active(token: str) -> bool:
     secret_key = os.getenv("SECRET_KEY")
     if not secret_key:
         raise RuntimeError("SECRET_KEY not set in environment")
+    
     try:
+        # 1. Decode the token (This checks signature and expiration)
         payload = jwt.decode(token, secret_key, algorithms=["HS256"])
-        return payload.get("exp", 0) > datetime.now().timestamp()
-    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        
+        user_id = payload.get("user_id") # Assuming user ID is stored here
+        if not user_id:
+            return False # Token is structurally invalid
+
+        # 2. STATEFUL CHECK: Look up the user in the database
+        db_user = collection.find_one({"_id": ObjectId(user_id)}) # Use the correct object ID type
+        
+        if not db_user:
+            return False 
+
+        # 3. If the user exists and the token hasn't expired, it's valid
+        return True 
+
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, jwt.DecodeError):
+        # Catches expired, invalid signature, or malformed tokens
+        return False
+    except Exception as e:
+        # Handle database errors or other unexpected issues
+        print(f"Validation error: {e}")
         return False
     
 def is_refresh_token_valid(token:str) -> bool:
