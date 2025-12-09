@@ -941,7 +941,7 @@ async def code_review(request: CodeInput, authorization: str = Header(None)):
             raise ValueError("No API Key found. Set GEMINI_API_KEY in .env")
 
         genai.configure(api_key=API_KEY)
-        model = genai.GenerativeModel('gemini-2.5-pro')
+        model = genai.GenerativeModel('gemini-2.5-flash')
 
         final_prompt = PROMPT_TEMPLATE.format(
             language=request.language,
