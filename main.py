@@ -404,7 +404,7 @@ async def verify_otp_endpoint(data: dict):
         provided_otp = str(provided_otp_raw).strip()
         if not provided_otp.isdigit():
             raise HTTPException(status_code=400, detail="Invalid OTP format")
-
+ 
         # Verify hashed OTP
         hashed_otp = user.get("otp")
         if not hashed_otp:
