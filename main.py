@@ -28,7 +28,6 @@ from tokens.check_tokens import get_remaining_tokens
 
 # ─── FastAPI Setup ───────────────────────────────────────────
 load_dotenv()
-# REMOVE: dependencies=[Depends(RateLimiter(times=10, seconds=60))] from app declaration
 # This dependency should only be on specific routes or the APIRouter.
 app = FastAPI(title="AI Developer Productivity API")
 router = APIRouter()
@@ -989,6 +988,11 @@ async def limited_route():
 @router.get("/unlimited")
 async def unlimited_route():
     return {"message": "This route has no limits."}
+
+@router.get("/")
+def health():
+    return {"status": "ok"}
+
 
 
 # ─── Include Router ─────────────────────────────────────────
