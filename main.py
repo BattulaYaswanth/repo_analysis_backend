@@ -11,9 +11,8 @@ from cachetools import TTLCache
 from typing import AsyncGenerator
 from datetime import timedelta, timezone
 from threading import Lock
-
+from google import genai
 import os, re, git, tempfile,datetime,random
-import google.generativeai as genai
 # ─── Internal Imports ────────────────────────────────────────
 from configurations import collection, review_collection
 from database.models import UserRegister, UserLogin, RepoInput,TokenRefresh,CodeInput
@@ -905,6 +904,13 @@ PROMPT_TEMPLATE = """
 # Cache: key = code text, value = full generated review text
 CODEREVIEW_CACHE = TTLCache(maxsize=1000, ttl=1800)  # TTL = 30 Minutes
 
+API_KEY = os.getenv("GEMINI_API_KEY")
+if not API_KEY:
+    raise ValueError("No API Key found. Set GEMINI_API_KEY in .env")
+
+# Note: The new SDK uses a Client object
+client = genai.Client(api_key=API_KEY)
+
 @router.post("/api/code_review",dependencies=[Depends(InMemoryRateLimiter)])
 async def code_review(request: CodeInput, authorization: str = Header(None)):
 
@@ -932,16 +938,6 @@ async def code_review(request: CodeInput, authorization: str = Header(None)):
 
         print("🚀 Cache MISS — calling Gemini API")
 
-        # -------------------------------
-        # 3. Configure Gemini
-        # -------------------------------
-        API_KEY = os.getenv("GEMINI_API_KEY")
-        if not API_KEY:
-            raise ValueError("No API Key found. Set GEMINI_API_KEY in .env")
-
-        genai.configure(api_key=API_KEY)
-        model = genai.GenerativeModel('gemini-2.5-flash')
-
         final_prompt = PROMPT_TEMPLATE.format(
             language=request.language,
             code_input=request.code
@@ -954,9 +950,10 @@ async def code_review(request: CodeInput, authorization: str = Header(None)):
             full_output = ""  # collect full text to store in cache
 
             try:
-                response_stream = await model.generate_content_async(
-                    final_prompt,
-                    stream=True
+                response_stream = await client.aio.models.generate_content(
+                    model='gemini-2.0-flash', # Updated to a current valid model
+                    contents=final_prompt,
+                    config={"extra_headers": {"X-Goog-Api-Client": "genai-python"}} # Optional
                 )
 
                 async for chunk in response_stream:

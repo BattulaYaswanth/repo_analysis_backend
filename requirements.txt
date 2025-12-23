@@ -14,7 +14,7 @@ langchain-groq
 langchain
 cachetools
 tiktoken
-google-generativeai
+google-genai
 certifi
 fastapi-limiter
 slowapi
