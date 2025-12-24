@@ -947,22 +947,23 @@ async def code_review(request: CodeInput, authorization: str = Header(None)):
         # 4. Streaming Generator (also saves to cache)
         # -------------------------------
         async def review_generator() -> AsyncGenerator[str, None]:
-            full_output = ""  # collect full text to store in cache
+            full_output = []  # Better memory management than += string
 
             try:
-                response_stream = await client.aio.models.generate_content(
-                    model='gemini-2.0-flash', # Updated to a current valid model
-                    contents=final_prompt,
-                    config={"extra_headers": {"X-Goog-Api-Client": "genai-python"}} # Optional
+                # Use generate_content_stream for the 'async for' iteration
+                response_stream = await client.aio.models.generate_content_stream(
+                    model='gemini-2.5-flash-lite', 
+                    contents=final_prompt
                 )
 
                 async for chunk in response_stream:
+                    # The chunk contains the text segment
                     if chunk.text:
-                        full_output += chunk.text
+                        full_output.append(chunk.text)
                         yield chunk.text
 
-                # Save final output to cache
-                CODEREVIEW_CACHE[cache_key] = full_output
+                # Save final output to cache after the loop finishes
+                CODEREVIEW_CACHE[cache_key] = "".join(full_output)
                 print("💾 Saved response to cache.")
 
             except Exception as e:
