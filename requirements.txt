@@ -11,12 +11,8 @@ PyGithub
 httpx
 gitpython
 langchain-groq
-langchain
 cachetools
 tiktoken
 google-genai
 certifi
-fastapi-limiter
-slowapi
-redis
 resend
