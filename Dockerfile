@@ -20,11 +20,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # 5. Configs
-COPY nginx.conf /etc/nginx/nginx.conf
-COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+# COPY nginx.conf /etc/nginx/nginx.conf
+# COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-ENV PORT=10000
-EXPOSE 10000
+ENV PORT=8000
+EXPOSE 8000
 
 # 6. Run supervisor with explicit config path
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+# CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+# Replace your Supervisor CMD with this:
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

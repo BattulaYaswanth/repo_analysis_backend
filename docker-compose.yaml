@@ -1,18 +1,78 @@
 version: '3.8'
 
 services:
-  mongodb:
-    image: mongo:latest
-    container_name: mongodb
-    restart: always
-    ports:
-      - "27017:27017"
+  app1:
+    build: .
     environment:
-      MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: password
-      MONGO_INITDB_DATABASE: ai-developer-productivity
-    volumes:
-      - mongo_data:/data/db
+      - APP_NAME=app1
+      - MONGO_URI=${MONGO_URI}
+      - DB_NAME=${DB_NAME}
+      - SECRET_KEY=${SECRET_KEY}
+      - OTP_EXPIRY_SECONDS=${OTP_EXPIRY_SECONDS}
+      - REFRESH_SECRET_KEY=${REFRESH_SECRET_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - ACCESS_TOKEN_EXPIRY= ${ACCESS_TOKEN_EXPIRY}
+      - GROQ_MODELS=${GROQ_MODELS}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - OTP_MESSAGE_TEMPLATE=${OTP_MESSAGE_TEMPLATE}
+      - MONGO_TLS=${MONGO_TLS}
+      - RESEND_API=${RESEND_API}
+    ports:
+      - "8001:8000"
+  app2:
+    build: .
+    environment:
+      - APP_NAME=app2
+      - MONGO_URI=${MONGO_URI}
+      - DB_NAME=${DB_NAME}
+      - SECRET_KEY=${SECRET_KEY}
+      - OTP_EXPIRY_SECONDS=${OTP_EXPIRY_SECONDS}
+      - REFRESH_SECRET_KEY=${REFRESH_SECRET_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - ACCESS_TOKEN_EXPIRY= ${ACCESS_TOKEN_EXPIRY}
+      - GROQ_MODELS=${GROQ_MODELS}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - OTP_MESSAGE_TEMPLATE=${OTP_MESSAGE_TEMPLATE}
+      - MONGO_TLS=${MONGO_TLS}
+      - RESEND_API=${RESEND_API}
+    ports:
+      - "8002:8000"
+  app3:
+    build: .
+    environment:
+      - APP_NAME=app3
+      - MONGO_URI=${MONGO_URI}
+      - DB_NAME=${DB_NAME}
+      - SECRET_KEY=${SECRET_KEY}
+      - OTP_EXPIRY_SECONDS=${OTP_EXPIRY_SECONDS}
+      - REFRESH_SECRET_KEY=${REFRESH_SECRET_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - ACCESS_TOKEN_EXPIRY= ${ACCESS_TOKEN_EXPIRY}
+      - GROQ_MODELS=${GROQ_MODELS}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - OTP_MESSAGE_TEMPLATE=${OTP_MESSAGE_TEMPLATE}
+      - MONGO_TLS=${MONGO_TLS}
+      - RESEND_API=${RESEND_API}
+    ports:
+      - "8003:8000"
+#   mongodb:
+#     image: mongo:latest
+#     container_name: mongodb
+#     restart: always
+#     ports:
+#       - "27017:27017"
+#     environment:
+#       MONGO_INITDB_ROOT_USERNAME: root
+#       MONGO_INITDB_ROOT_PASSWORD: password
+#       MONGO_INITDB_DATABASE: ai-developer-productivity
+#     volumes:
+#       - mongo_data:/data/db
 
-volumes:
-  mongo_data:
+# volumes:
+#   mongo_data:
