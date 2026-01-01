@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fastapi-app
+spec:
+  replicas: 3   # app1, app2, app3
+  selector:
+    matchLabels:
+      app: fastapi
+  template:
+    metadata:
+      labels:
+        app: fastapi
+    spec:
+      containers:
+      - name: fastapi
+        image: yashmanic/fastapi-app:1.0
+        ports:
+        - containerPort: 8000
+        env:
+        - name: MONGO_URI
+          valueFrom:
+            secretKeyRef:
+              name: fastapi-secret
+              key: MONGO_URI
+
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: fastapi-secret
+              key: DB_NAME
+
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: fastapi-secret
+              key: SECRET_KEY
+
+        - name: OTP_EXPIRY_SECONDS
+          valueFrom:
+            secretKeyRef:
+              name: fastapi-secret
+              key: OTP_EXPIRY_SECONDS
+
+        - name: REFRESH_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: fastapi-secret
+              key: REFRESH_SECRET_KEY
+
+        - name: GITHUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: fastapi-secret
+              key: GITHUB_TOKEN
+
+        - name: GROQ_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: fastapi-secret
+              key: GROQ_API_KEY
+
+        - name: ACCESS_TOKEN_EXPIRY
+          valueFrom:
+            secretKeyRef:
+              name: fastapi-secret
+              key: ACCESS_TOKEN_EXPIRY
+
+        - name: GROQ_MODELS
+          valueFrom:
+            secretKeyRef:
+              name: fastapi-secret
+              key: GROQ_MODELS
+
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: fastapi-secret
+              key: GEMINI_API_KEY
+
+        - name: ALLOWED_ORIGINS
+          valueFrom:
+            secretKeyRef:
+              name: fastapi-secret
+              key: ALLOWED_ORIGINS
+
+        - name: OTP_MESSAGE_TEMPLATE
+          valueFrom:
+            secretKeyRef:
+              name: fastapi-secret
+              key: OTP_MESSAGE_TEMPLATE
+
+        - name: MONGO_TLS
+          valueFrom:
+            secretKeyRef:
+              name: fastapi-secret
+              key: MONGO_TLS
+
+        - name: RESEND_API
+          valueFrom:
+            secretKeyRef:
+              name: fastapi-secret
+              key: RESEND_API

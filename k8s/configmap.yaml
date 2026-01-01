@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  DB_NAME: mydb
+  OTP_EXPIRY_SECONDS: "300"
+  ACCESS_TOKEN_EXPIRY: "3600"
+  GROQ_MODELS: "llama3"
+  ALLOWED_ORIGINS: "*"
+  OTP_MESSAGE_TEMPLATE: "Your OTP is {{otp}}"
+  MONGO_TLS: "true"
