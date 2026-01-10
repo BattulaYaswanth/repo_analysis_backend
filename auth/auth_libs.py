@@ -1,6 +1,7 @@
-from datetime import datetime,timedelta
 import bcrypt,random,jwt,os
 import resend
+import secrets
+from datetime import datetime,timedelta
 from resend import Emails
 from configurations import collection
 from bson.objectid import ObjectId
@@ -110,9 +111,9 @@ def decode_jwt_token(token: str):
         raise Exception("Invalid token")
     
 
-def generate_otp() -> str:
-    """Generates a 6-digit OTP."""
-    return str(random.randint(100000, 999999))
+def generate_otp(length=6):
+    return ''.join(str(secrets.randbelow(10)) for _ in range(length))
+
 
 def hash_otp(otp: str) -> str:
     """Hash an OTP using bcrypt for secure storage."""
